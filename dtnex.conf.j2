@@ -1,0 +1,51 @@
+{{ ansible_managed | comment }}
+#
+# Configurazione DTNEX per {{ node_self.name }} -> ipn:{{ node_self.ipn }}
+#
+# ATTENZIONE: dtnex apre questo file con un percorso RELATIVO ("dtnex.conf"),
+# quindi va lanciato avendo {{ dtn_home }} come working directory.
+# Lo script start-dtnex.sh se ne occupa.
+
+# Ogni quanti secondi annunciare contatti e metadati ai vicini.
+# Valore basso rispetto al default (1800) per rendere osservabile il testbed.
+updateInterval={{ dtnex_update_interval }}
+
+# TTL dei bundle inviati: deve essere >= updateInterval
+bundleTTL={{ dtnex_bundle_ttl }}
+
+# Per quanto tempo resta valida un'informazione di contatto ricevuta
+contactLifetime={{ dtnex_contact_lifetime }}
+
+# Tolleranza sul disallineamento di clock fra i nodi
+contactTimeTolerance={{ dtnex_contact_time_tolerance }}
+
+# Chiave pre-condivisa per l'autenticazione HMAC-SHA256.
+# Deve essere IDENTICA su tutti i nodi, altrimenti i messaggi vengono
+# scartati silenziosamente.
+presSharedNetworkKey={{ dtnex_network_key }}
+
+# Metadati del nodo, formato: "Nome,Contatto,Localita"
+# Nome e Contatto sono limitati a 24 caratteri ciascuno dal protocollo.
+nodemetadata="{{ node_self.name }},{{ dtnex_node_contact }},{{ dtnex_node_location }}"
+{% if dtnex_gps_latitude | string | length > 0 and dtnex_gps_longitude | string | length > 0 %}
+
+# Coordinate GPS opzionali
+gpsLatitude={{ dtnex_gps_latitude }}
+gpsLongitude={{ dtnex_gps_longitude }}
+{% else %}
+
+# Coordinate GPS opzionali (disattivate)
+#gpsLatitude=59.334591
+#gpsLongitude=18.063240
+{% endif %}
+
+# Generazione del grafo GraphViz della topologia appresa
+createGraph={{ 'true' if dtnex_create_graph else 'false' }}
+graphFile={{ dtnex_graph_file }}
+
+# Modalita' di esecuzione
+serviceMode={{ 'true' if dtnex_service_mode else 'false' }}
+debugMode={{ 'true' if dtnex_debug else 'false' }}
+
+# Scambio dei metadati fra nodi
+noMetadataExchange={{ 'true' if dtnex_no_metadata_exchange else 'false' }}

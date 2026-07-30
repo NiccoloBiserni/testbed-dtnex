@@ -1,0 +1,96 @@
+---
+# Compilazione e installazione di ION (o IONe) da sorgente in /usr/local.
+# Idempotente: un file marker registra flavor+versione gia' installati.
+
+- name: Normalizza i parametri del flavor scelto
+  ansible.builtin.set_fact:
+    ion_src_repo: "{{ ione_repo if ion_flavor == 'ione' else ion_repo }}"
+    ion_src_ref:  "{{ ione_version if ion_flavor == 'ione' else ion_version }}"
+    ion_src_path: "{{ src_dir }}/{{ 'ione-code' if ion_flavor == 'ione' else 'ion-dtn' }}"
+    ion_marker:   "/usr/local/share/ion-testbed-installed"
+
+- name: Verifica se ION e' gia' installato alla versione richiesta
+  ansible.builtin.slurp:
+    src: "{{ ion_marker }}"
+  register: ion_marker_content
+  failed_when: false
+
+- name: Determina se la build e' necessaria
+  ansible.builtin.set_fact:
+    ion_needs_build: >-
+      {{ ion_force_rebuild
+         or ion_marker_content.content is not defined
+         or (ion_marker_content.content | b64decode | trim) != (ion_flavor ~ ':' ~ ion_src_ref) }}
+
+- name: ION gia' presente, build saltata
+  ansible.builtin.debug:
+    msg: "ION {{ ion_flavor }}:{{ ion_src_ref }} gia' installato, nessuna ricompilazione."
+  when: not ion_needs_build
+
+- name: Blocco di build ION
+  when: ion_needs_build
+  block:
+
+    - name: Clona i sorgenti ION ({{ ion_flavor }} {{ ion_src_ref }})
+      ansible.builtin.git:
+        repo: "{{ ion_src_repo }}"
+        dest: "{{ ion_src_path }}"
+        version: "{{ ion_src_ref }}"
+        depth: 1
+        force: true
+      register: ion_clone
+      retries: 3
+      delay: 10
+      until: ion_clone is succeeded
+
+    - name: Verifica la presenza dello script configure
+      ansible.builtin.stat:
+        path: "{{ ion_src_path }}/configure"
+      register: ion_configure
+
+    - name: Genera lo script configure con autoreconf
+      ansible.builtin.command:
+        cmd: autoreconf -fi
+        chdir: "{{ ion_src_path }}"
+      when: not ion_configure.stat.exists
+      changed_when: true
+
+    - name: Esegue ./configure
+      ansible.builtin.command:
+        cmd: ./configure CFLAGS="-g -O2 {{ ion_extra_cflags }}"
+        chdir: "{{ ion_src_path }}"
+        creates: "{{ ion_src_path }}/Makefile"
+
+    - name: Compila ION (puo' richiedere diversi minuti)
+      ansible.builtin.command:
+        cmd: "make -j{{ ion_make_jobs }}"
+        chdir: "{{ ion_src_path }}"
+      changed_when: true
+
+    - name: Installa ION in /usr/local
+      ansible.builtin.command:
+        cmd: make install
+        chdir: "{{ ion_src_path }}"
+      changed_when: true
+
+    - name: Aggiorna la cache del linker
+      ansible.builtin.command: ldconfig
+      changed_when: true
+
+    - name: Scrive il marker di installazione
+      ansible.builtin.copy:
+        dest: "{{ ion_marker }}"
+        content: "{{ ion_flavor }}:{{ ion_src_ref }}\n"
+        mode: "0644"
+
+- name: Verifica che i binari ION siano nel PATH
+  ansible.builtin.command: "which {{ item }}"
+  loop: [ionadmin, bpadmin, ipnadmin, ionstart, ionstop, killm, bping, bpsink, bpsource]
+  changed_when: false
+
+- name: Verifica che libbp e libici siano linkabili
+  ansible.builtin.stat:
+    path: "/usr/local/lib/{{ item }}"
+  register: ion_libs
+  failed_when: not ion_libs.stat.exists
+  loop: [libbp.so, libici.so]

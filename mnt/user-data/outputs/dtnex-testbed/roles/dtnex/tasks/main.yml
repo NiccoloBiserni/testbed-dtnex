@@ -1,0 +1,60 @@
+---
+# Compilazione e installazione di DTNEX.
+# Si usa build_standalone.sh, che compila con gli header ION inclusi nel
+# repository e linka contro le librerie di sistema libbp/libici.
+# L'installazione viene fatta con una copia esplicita invece di `make install`
+# perche' il target `install` del Makefile dipende da header ION esterni.
+
+- name: Definisce il percorso dei sorgenti DTNEX
+  ansible.builtin.set_fact:
+    dtnex_src_path: "{{ src_dir }}/ion-dtn-dtnex"
+
+- name: Clona i sorgenti DTNEX
+  ansible.builtin.git:
+    repo: "{{ dtnex_repo }}"
+    dest: "{{ dtnex_src_path }}"
+    version: "{{ dtnex_version }}"
+    force: true
+  register: dtnex_clone
+  retries: 3
+  delay: 5
+  until: dtnex_clone is succeeded
+
+- name: Verifica la presenza del binario gia' installato
+  ansible.builtin.stat:
+    path: /usr/local/bin/dtnex
+  register: dtnex_bin
+
+- name: Rende eseguibile build_standalone.sh
+  ansible.builtin.file:
+    path: "{{ dtnex_src_path }}/build_standalone.sh"
+    mode: "0755"
+
+- name: Compila DTNEX
+  ansible.builtin.command:
+    cmd: ./build_standalone.sh
+    chdir: "{{ dtnex_src_path }}"
+  register: dtnex_build
+  changed_when: true
+  when: dtnex_clone.changed or dtnex_force_rebuild or not dtnex_bin.stat.exists
+
+- name: Mostra l'output della build in caso di errore
+  ansible.builtin.debug:
+    var: dtnex_build.stdout_lines
+  when: dtnex_build is failed
+
+- name: Installa il binario dtnex in /usr/local/bin
+  ansible.builtin.copy:
+    src: "{{ dtnex_src_path }}/dtnex"
+    dest: /usr/local/bin/dtnex
+    remote_src: true
+    mode: "0755"
+    owner: root
+    group: root
+
+- name: Verifica che dtnex sia linkato correttamente
+  ansible.builtin.shell:
+    cmd: "ldd /usr/local/bin/dtnex | grep -E 'libbp|libici|libcrypto'"
+  changed_when: false
+  register: dtnex_ldd
+  failed_when: "'not found' in dtnex_ldd.stdout"

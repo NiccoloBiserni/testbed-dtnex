@@ -1,0 +1,19 @@
+#!/bin/bash
+# {{ ansible_managed }}
+# Arresto di ION su {{ node_self.name }}
+cd "{{ dtn_home }}"
+
+if pgrep -x dtnex >/dev/null 2>&1; then
+    echo ">> Arresto di dtnex in corso..."
+    pkill -TERM -x dtnex || true
+    sleep 2
+fi
+
+echo ">> ionstop"
+ionstop || true
+sleep 2
+
+echo ">> killm (pulizia della memoria condivisa residua)"
+killm || true
+
+echo "ION arrestato."

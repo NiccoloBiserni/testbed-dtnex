@@ -1,0 +1,11 @@
+---
+ion_udp_port:         4556
+ion_wm_size:          50000000
+ion_heap_words:       20000000
+ion_config_flags:     1
+ion_contact_datarate: 100000
+ion_contact_duration: 86400
+ion_owlt:             1
+dtn_home:             "/home/vagrant/dtn"
+dtn_user:             vagrant
+dtn_group:            vagrant

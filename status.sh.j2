@@ -1,0 +1,42 @@
+#!/bin/bash
+# {{ ansible_managed }}
+# Stato del nodo {{ node_self.name }} (ipn:{{ node_self.ipn }})
+cd "{{ dtn_home }}"
+
+echo "=============================================================="
+echo " Nodo   : {{ node_self.name }}  ipn:{{ node_self.ipn }}  ({{ node_self.ip }})"
+echo " Vicini : {{ node_neighbors | map(attribute='ipn') | join(', ') if node_neighbors else 'nessuno' }}"
+echo "=============================================================="
+
+echo
+echo "--- Processi ---"
+pgrep -a -x rfxclock >/dev/null 2>&1 && echo "ION   : ATTIVO" || echo "ION   : fermo"
+pgrep -a -x dtnex    >/dev/null 2>&1 && echo "DTNEX : ATTIVO" || echo "DTNEX : fermo"
+
+if ! pgrep -x rfxclock >/dev/null 2>&1; then
+    echo
+    echo "ION non e' in esecuzione: nessun altro dato disponibile."
+    exit 0
+fi
+
+echo
+echo "--- Contact plan (ionadmin: l contact) ---"
+printf 'l contact\nq\n' | ionadmin
+
+echo
+echo "--- Range (ionadmin: l range) ---"
+printf 'l range\nq\n' | ionadmin
+
+echo
+echo "--- Egress plan (ipnadmin: l plan) ---"
+printf 'l plan\nq\n' | ipnadmin
+
+echo
+echo "--- Bundle in coda (bplist) ---"
+bplist 2>/dev/null | head -30 || echo "(bplist non disponibile)"
+
+if [ -f "{{ dtn_home }}/nodesmetadata.txt" ]; then
+    echo
+    echo "--- Metadati dei nodi appresi via DTNEX ---"
+    cat "{{ dtn_home }}/nodesmetadata.txt"
+fi

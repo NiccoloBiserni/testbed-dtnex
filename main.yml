@@ -1,0 +1,71 @@
+---
+# Prerequisiti comuni a tutti i nodi: pacchetti, /etc/hosts, tuning IPC, clock.
+
+- name: Aggiorna la cache apt
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Installa toolchain e dipendenze di build
+  ansible.builtin.apt:
+    name:
+      - build-essential
+      - autoconf
+      - automake
+      - libtool
+      - pkg-config
+      - git
+      - libssl-dev          # HMAC-SHA256 di DTNEX
+      - graphviz            # generazione del grafo di topologia
+      - chrony              # ION e' sensibile al disallineamento di clock
+      - net-tools
+      - tcpdump
+      - psmisc
+    state: present
+
+- name: Abilita e avvia chrony
+  ansible.builtin.systemd:
+    name: chrony
+    enabled: true
+    state: started
+
+- name: Registra tutti i nodi del testbed in /etc/hosts
+  ansible.builtin.blockinfile:
+    path: /etc/hosts
+    marker: "# {mark} DTNEX TESTBED"
+    block: |
+      {% for n in dtn_nodes %}
+      {{ n.ip }} {{ n.name }} {{ n.name }}.testbed.local
+      {% endfor %}
+
+- name: Tuning IPC SystemV e buffer di rete richiesti da ION
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/99-ion.conf
+    mode: "0644"
+    content: |
+      # Parametri richiesti da ION-DTN (memoria condivisa SystemV, socket UDP)
+      kernel.shmmax = 2147483648
+      kernel.shmall = 2097152
+      kernel.shmmni = 4096
+      net.core.rmem_max = 8388608
+      net.core.wmem_max = 8388608
+  register: ion_sysctl
+
+- name: Applica i parametri sysctl
+  ansible.builtin.command: sysctl -p /etc/sysctl.d/99-ion.conf
+  when: ion_sysctl.changed
+  changed_when: true
+
+- name: Crea la working directory DTN
+  ansible.builtin.file:
+    path: "{{ dtn_home }}"
+    state: directory
+    owner: "{{ dtn_user }}"
+    group: "{{ dtn_group }}"
+    mode: "0755"
+
+- name: Crea la directory dei sorgenti
+  ansible.builtin.file:
+    path: "{{ src_dir }}"
+    state: directory
+    mode: "0755"

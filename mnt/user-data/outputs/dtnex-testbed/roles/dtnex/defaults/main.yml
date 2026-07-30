@@ -1,0 +1,5 @@
+---
+dtnex_repo:        "https://github.com/samograsic/ion-dtn-dtnex.git"
+dtnex_version:     "main"
+dtnex_force_rebuild: false
+src_dir:           "/usr/local/src"

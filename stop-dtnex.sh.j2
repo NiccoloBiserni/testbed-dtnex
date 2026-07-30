@@ -1,0 +1,21 @@
+#!/bin/bash
+# {{ ansible_managed }}
+# Arresto di DTNEX su {{ node_self.name }}
+cd "{{ dtn_home }}"
+
+if ! pgrep -x dtnex >/dev/null 2>&1; then
+    echo "DTNEX non e' in esecuzione."
+    exit 0
+fi
+
+echo ">> SIGTERM a dtnex (shutdown pulito: chiude gli endpoint e si stacca da ION)"
+pkill -TERM -x dtnex
+
+for _ in $(seq 1 10); do
+    pgrep -x dtnex >/dev/null 2>&1 || { echo "DTNEX arrestato."; exit 0; }
+    sleep 1
+done
+
+echo ">> Timeout, invio SIGKILL"
+pkill -KILL -x dtnex || true
+echo "DTNEX terminato forzatamente."

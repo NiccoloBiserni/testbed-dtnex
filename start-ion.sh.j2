@@ -1,0 +1,25 @@
+#!/bin/bash
+# {{ ansible_managed }}
+# Avvio manuale di ION su {{ node_self.name }} (ipn:{{ node_self.ipn }})
+set -euo pipefail
+
+cd "{{ dtn_home }}"
+
+if pgrep -x rfxclock >/dev/null 2>&1; then
+    echo "ION risulta gia' in esecuzione (rfxclock attivo)."
+    echo "Usa ./stop-ion.sh prima di riavviare."
+    exit 1
+fi
+
+echo ">> ionstart -I {{ dtn_home }}/node.rc"
+ionstart -I "{{ dtn_home }}/node.rc"
+
+sleep 2
+echo
+echo ">> Contact plan iniziale:"
+printf 'l contact\nq\n' | ionadmin
+echo
+echo ">> Egress plan:"
+printf 'l plan\nq\n' | ipnadmin
+echo
+echo "ION avviato. Ora puoi lanciare ./start-dtnex.sh"

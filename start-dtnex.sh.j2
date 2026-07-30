@@ -1,0 +1,39 @@
+#!/bin/bash
+# {{ ansible_managed }}
+# Avvio manuale di DTNEX su {{ node_self.name }} (ipn:{{ node_self.ipn }})
+#
+# Uso:
+#   ./start-dtnex.sh            avvia in foreground (Ctrl-C per fermare)
+#   ./start-dtnex.sh -d         avvia in background, log in log/dtnex.log
+set -uo pipefail
+
+# IMPORTANTE: dtnex legge ./dtnex.conf dalla working directory.
+cd "{{ dtn_home }}"
+
+if ! pgrep -x rfxclock >/dev/null 2>&1; then
+    echo "ION non risulta in esecuzione. Lancia prima ./start-ion.sh"
+    exit 1
+fi
+
+if pgrep -x dtnex >/dev/null 2>&1; then
+    echo "DTNEX risulta gia' in esecuzione. Usa ./stop-dtnex.sh."
+    exit 1
+fi
+
+if [ "${1:-}" = "-d" ]; then
+    mkdir -p log
+    echo ">> Avvio di dtnex in background (log: {{ dtn_home }}/log/dtnex.log)"
+    nohup dtnex --debug >> log/dtnex.log 2>&1 &
+    sleep 2
+    if pgrep -x dtnex >/dev/null 2>&1; then
+        echo "DTNEX avviato (pid $(pgrep -x dtnex))."
+        echo "Segui il log con: tail -f {{ dtn_home }}/log/dtnex.log"
+    else
+        echo "Avvio fallito. Ultime righe del log:"
+        tail -20 log/dtnex.log
+        exit 1
+    fi
+else
+    echo ">> Avvio di dtnex in foreground (Ctrl-C per terminare)"
+    exec dtnex --debug
+fi

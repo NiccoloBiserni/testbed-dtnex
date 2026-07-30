@@ -1,0 +1,34 @@
+#!/bin/bash
+# {{ ansible_managed }}
+# Test di raggiungibilita' dal nodo {{ node_self.name }} (ipn:{{ node_self.ipn }})
+#
+# Uso:
+#   ./test-network.sh           esegue bping verso TUTTI gli altri nodi
+#   ./test-network.sh 268485003 esegue bping verso un nodo specifico
+#
+# bping viene inviato al servizio 12161, l'endpoint echo esposto da DTNEX.
+# Se un nodo non direttamente adiacente risponde, significa che il contatto
+# multi-hop e' stato appreso correttamente via DTNEX.
+cd "{{ dtn_home }}"
+
+if ! pgrep -x rfxclock >/dev/null 2>&1; then
+    echo "ION non e' in esecuzione."
+    exit 1
+fi
+
+SELF={{ node_self.ipn }}
+
+if [ $# -ge 1 ]; then
+    TARGETS="$1"
+else
+    TARGETS="{% for n in dtn_nodes if n.ipn != node_self.ipn %}{{ n.ipn }} {% endfor %}"
+fi
+
+for t in $TARGETS; do
+    echo "=============================================================="
+    echo " bping ipn:${SELF}.3 -> ipn:${t}.12161"
+    echo "=============================================================="
+    timeout 40 bping -c 3 "ipn:${SELF}.3" "ipn:${t}.12161" || \
+        echo "  nessuna risposta da ipn:${t} (contatto non ancora appreso?)"
+    echo
+done

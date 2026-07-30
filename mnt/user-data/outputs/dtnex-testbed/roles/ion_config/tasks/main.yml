@@ -1,0 +1,41 @@
+---
+# Genera i file di configurazione ION del nodo e gli script di avvio/arresto.
+# Nessun servizio viene avviato: l'avvio e' manuale.
+
+- name: Installa il file .ionconfig (memoria SDR/working memory)
+  ansible.builtin.template:
+    src: node.ionconfig.j2
+    dest: "{{ dtn_home }}/node.ionconfig"
+    owner: "{{ dtn_user }}"
+    group: "{{ dtn_group }}"
+    mode: "0644"
+
+- name: Installa il file .rc combinato per ionstart
+  ansible.builtin.template:
+    src: node.rc.j2
+    dest: "{{ dtn_home }}/node.rc"
+    owner: "{{ dtn_user }}"
+    group: "{{ dtn_group }}"
+    mode: "0644"
+
+- name: Installa gli script di gestione di ION
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "{{ dtn_home }}/{{ item }}"
+    owner: "{{ dtn_user }}"
+    group: "{{ dtn_group }}"
+    mode: "0755"
+  loop:
+    - start-ion.sh
+    - stop-ion.sh
+    - status.sh
+
+- name: Aggiunge la working directory DTN al profilo dell'utente
+  ansible.builtin.blockinfile:
+    path: "/home/{{ dtn_user }}/.bashrc"
+    marker: "# {mark} DTNEX TESTBED"
+    block: |
+      export ION_NODE_WDNAME={{ dtn_home }}
+      cd {{ dtn_home }} 2>/dev/null || true
+    owner: "{{ dtn_user }}"
+    group: "{{ dtn_group }}"

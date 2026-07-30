@@ -1,0 +1,51 @@
+---
+- name: Testbed DTNEX - provisioning nodi ION + DTNEX
+  hosts: all
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Verifica che la topologia sia stata passata dal Vagrantfile
+      ansible.builtin.assert:
+        that:
+          - dtn_nodes is defined
+          - dtn_nodes | length >= 2
+        fail_msg: >-
+          La variabile 'dtn_nodes' non e' definita. Questo playbook e' pensato
+          per essere eseguito tramite `vagrant up` / `vagrant provision`.
+
+    - name: Individua la definizione del nodo corrente
+      ansible.builtin.set_fact:
+        node_self: "{{ dtn_nodes | selectattr('name', 'equalto', inventory_hostname) | first }}"
+
+    - name: Calcola l'elenco dei vicini diretti
+      ansible.builtin.set_fact:
+        node_neighbors: "{{ dtn_nodes | selectattr('index', 'in', node_self.neighbors) | list }}"
+
+    - name: Riepilogo nodo
+      ansible.builtin.debug:
+        msg: >-
+          {{ node_self.name }} = ipn:{{ node_self.ipn }} @ {{ node_self.ip }} |
+          vicini: {{ node_neighbors | map(attribute='ipn') | join(', ') }}
+
+  roles:
+    - role: common
+      tags: [common]
+    - role: ion
+      tags: [ion, build]
+    - role: ion_config
+      tags: [ion, config]
+    - role: dtnex
+      tags: [dtnex, build]
+    - role: dtnex_config
+      tags: [dtnex, config]
+
+  post_tasks:
+    - name: Istruzioni finali
+      ansible.builtin.debug:
+        msg:
+          - "Provisioning completato su {{ inventory_hostname }}."
+          - "ION e DTNEX NON sono stati avviati (avvio manuale, come richiesto)."
+          - "vagrant ssh {{ inventory_hostname }}"
+          - "  cd {{ dtn_home }} && ./start-ion.sh    # avvia ION"
+          - "  cd {{ dtn_home }} && ./start-dtnex.sh  # avvia DTNEX (foreground)"

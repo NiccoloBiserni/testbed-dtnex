@@ -1,0 +1,55 @@
+---
+# ---------------------------------------------------------------------------
+# Variabili condivise da tutti i nodi del testbed
+# ---------------------------------------------------------------------------
+
+dtn_user:  vagrant
+dtn_group: vagrant
+dtn_home:  "/home/vagrant/dtn"      # working directory di ION e DTNEX
+src_dir:   "/usr/local/src"
+
+# --- Implementazione ION ----------------------------------------------------
+# 'ione' -> IONe 1.1.0 (branch sperimentale su SourceForge).
+#           E' l'implementazione contro cui DTNEX e' effettivamente compilato:
+#           gli header in ion-dtn-dtnex/include/ion provengono da qui e le
+#           struct in memoria condivisa (IonDB, contact RBT) corrispondono.
+# 'ion'   -> ION-DTN ufficiale NASA/JPL. Compila e linka, ma il layout delle
+#            struct e' diverso: DTNEX potrebbe leggere dati incoerenti dalla
+#            shared memory. Usare solo consapevolmente.
+ion_flavor: ione
+
+ione_repo:    "https://git.code.sf.net/p/ione/code"
+ione_version: "ione-1.1.0"
+
+ion_repo:     "https://github.com/nasa-jpl/ION-DTN.git"
+ion_version:  "ion-open-source-4.1.3s"
+
+ion_make_jobs:    2
+ion_extra_cflags: "-fcommon"
+
+# --- DTNEX ------------------------------------------------------------------
+dtnex_repo:    "https://github.com/samograsic/ion-dtn-dtnex.git"
+dtnex_version: "main"
+
+# --- Parametri ION ----------------------------------------------------------
+ion_udp_port:         4556
+ion_wm_size:          50000000     # working memory (byte)
+ion_heap_words:       20000000     # SDR heap (word da 8 byte -> ~160 MB)
+ion_config_flags:     1            # 1 = SDR in DRAM, nessuna persistenza su file
+ion_contact_datarate: 100000       # byte/s dichiarati per i contatti locali
+ion_contact_duration: 86400        # durata dei contatti locali (s)
+ion_owlt:             1            # one-way light time (s)
+
+# --- Parametri DTNEX (dtnex.conf) -------------------------------------------
+dtnex_update_interval:        30       # intervallo di annuncio, basso per il testbed
+dtnex_bundle_ttl:             1800
+dtnex_contact_lifetime:       3600
+dtnex_contact_time_tolerance: 1800
+dtnex_network_key:            "dtnex-testbed"
+dtnex_create_graph:           true
+dtnex_graph_file:             "{{ dtn_home }}/contactGraph.gv"
+dtnex_service_mode:           false
+dtnex_debug:                  true
+dtnex_no_metadata_exchange:   false
+dtnex_node_location:          "Testbed"
+dtnex_node_contact:           "admin@testbed.local"

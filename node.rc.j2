@@ -1,0 +1,73 @@
+{{ ansible_managed | comment }}
+#
+# Configurazione ION per {{ node_self.name }}  ->  ipn:{{ node_self.ipn }} ({{ node_self.ip }})
+# Topologia: {{ dtn_topology }} | vicini diretti: {{ node_neighbors | map(attribute='ipn') | join(', ') if node_neighbors else 'nessuno' }}
+#
+# File combinato per `ionstart -I node.rc`. Le sezioni vengono estratte e
+# passate ai rispettivi admin program nell'ordine:
+#   ionadmin -> ionsecadmin -> bpadmin -> ipnadmin
+#
+# NOTA: qui sono dichiarati SOLO i contatti verso i vicini diretti.
+# Tutto il resto della topologia viene appreso a runtime da DTNEX.
+
+## begin ionadmin
+# Inizializzazione del nodo con i parametri di memoria
+1 {{ node_self.ipn }} {{ dtn_home }}/node.ionconfig
+
+# Avvio di rfxclock
+s
+
+# Contatto e range di loopback (necessari perche' il nodo possa
+# instradare verso se stesso e comparire nel proprio contact graph)
+a contact +1 +{{ ion_contact_duration }} {{ node_self.ipn }} {{ node_self.ipn }} {{ ion_contact_datarate }}
+a range   +1 +{{ ion_contact_duration }} {{ node_self.ipn }} {{ node_self.ipn }} {{ ion_owlt }}
+{% for nb in node_neighbors %}
+
+# --- vicino diretto: {{ nb.name }} (ipn:{{ nb.ipn }} @ {{ nb.ip }}) ---
+a contact +1 +{{ ion_contact_duration }} {{ node_self.ipn }} {{ nb.ipn }} {{ ion_contact_datarate }}
+a contact +1 +{{ ion_contact_duration }} {{ nb.ipn }} {{ node_self.ipn }} {{ ion_contact_datarate }}
+a range   +1 +{{ ion_contact_duration }} {{ node_self.ipn }} {{ nb.ipn }} {{ ion_owlt }}
+{% endfor %}
+## end ionadmin
+
+## begin ionsecadmin
+# Inizializzazione del database di sicurezza (richiesta anche se non si usa BPSec)
+1
+## end ionsecadmin
+
+## begin bpadmin
+# Inizializzazione del Bundle Protocol
+1
+
+# Schema di naming IPN
+a scheme ipn 'ipnfw' 'ipnadminep'
+
+# Endpoint amministrativi e applicativi del nodo locale.
+# Gli endpoint 12160 (DTNEX) e 12161 (bpecho) sono registrati a runtime
+# direttamente da dtnex tramite addEndpoint(), quindi non vanno dichiarati qui.
+a endpoint ipn:{{ node_self.ipn }}.0 q
+a endpoint ipn:{{ node_self.ipn }}.1 q
+a endpoint ipn:{{ node_self.ipn }}.2 q
+a endpoint ipn:{{ node_self.ipn }}.3 q
+a endpoint ipn:{{ node_self.ipn }}.4 q
+a endpoint ipn:{{ node_self.ipn }}.64 q
+a endpoint ipn:{{ node_self.ipn }}.65 q
+
+# Convergence layer UDP
+a protocol udp 1400 100
+a induct udp 0.0.0.0:{{ ion_udp_port }} udpcli
+{% for nb in node_neighbors %}
+a outduct udp {{ nb.ip }}:{{ ion_udp_port }} udpclo
+{% endfor %}
+
+# Avvio dei demoni BP
+s
+## end bpadmin
+
+## begin ipnadmin
+# Egress plan verso i vicini diretti.
+# DTNEX legge questa lista per sapere a chi inoltrare i propri messaggi.
+{% for nb in node_neighbors %}
+a plan {{ nb.ipn }} udp/{{ nb.ip }}:{{ ion_udp_port }}
+{% endfor %}
+## end ipnadmin

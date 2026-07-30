@@ -1,0 +1,8 @@
+{{ ansible_managed | comment }}
+{# Configurazione della memoria di ION per {{ node_self.name }} (ipn:{{ node_self.ipn }}) #}
+wmKey       {{ 65000 + node_self.index }}
+sdrName     ion{{ node_self.index }}
+wmSize      {{ ion_wm_size }}
+configFlags {{ ion_config_flags }}
+heapWords   {{ ion_heap_words }}
+pathName    {{ dtn_home }}

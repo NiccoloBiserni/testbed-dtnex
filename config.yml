@@ -1,0 +1,31 @@
+# ---------------------------------------------------------------------------
+# Parametri del testbed DTNEX
+# Tutti i valori possono essere sovrascritti da variabili d'ambiente:
+#   NODES=2 vagrant up
+#   TOPOLOGY=full vagrant up
+# ---------------------------------------------------------------------------
+
+# Numero di nodi da creare (2 o 3; il limite superiore e' max_nodes)
+nodes: 3
+max_nodes: 6
+
+# Topologia dei link diretti fra i nodi:
+#   chain -> n1 <-> n2 <-> n3        (consigliata: verifica il flooding multi-hop)
+#   full  -> mesh completa
+#   ring  -> anello (equivale a full con 3 nodi)
+topology: chain
+
+# Box e risorse
+box: bento/ubuntu-22.04
+memory: 2048
+cpus: 2
+
+# Rete privata host-only. Il nodo i riceve <network_prefix>.<ip_start + i>
+network_prefix: "192.168.56"
+ip_start: 20
+
+# Numerazione IPN: il nodo i riceve ipn:<ipn_base + i>
+ipn_base: 268485000
+
+hostname_prefix: "dtn-node"
+vm_name_prefix: "dtnex"

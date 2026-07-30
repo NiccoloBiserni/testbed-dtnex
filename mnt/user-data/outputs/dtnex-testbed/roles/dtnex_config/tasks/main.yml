@@ -1,0 +1,40 @@
+---
+# Installa dtnex.conf e gli script di gestione di DTNEX.
+# Nessun avvio automatico: DTNEX va lanciato a mano dopo ION.
+
+- name: Controlla la lunghezza dei campi dei metadati
+  ansible.builtin.assert:
+    that:
+      - node_self.name | length <= 24
+      - dtnex_node_contact | length <= 24
+    fail_msg: >-
+      I campi 'name' e 'contact' dei metadati DTNEX sono limitati a 24 caratteri
+      dal protocollo CBOR (vedi README di DTNEX).
+
+- name: Installa dtnex.conf
+  ansible.builtin.template:
+    src: dtnex.conf.j2
+    dest: "{{ dtn_home }}/dtnex.conf"
+    owner: "{{ dtn_user }}"
+    group: "{{ dtn_group }}"
+    mode: "0644"
+
+- name: Installa gli script di gestione di DTNEX
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "{{ dtn_home }}/{{ item }}"
+    owner: "{{ dtn_user }}"
+    group: "{{ dtn_group }}"
+    mode: "0755"
+  loop:
+    - start-dtnex.sh
+    - stop-dtnex.sh
+    - test-network.sh
+
+- name: Crea la directory dei log
+  ansible.builtin.file:
+    path: "{{ dtn_home }}/log"
+    state: directory
+    owner: "{{ dtn_user }}"
+    group: "{{ dtn_group }}"
+    mode: "0755"
