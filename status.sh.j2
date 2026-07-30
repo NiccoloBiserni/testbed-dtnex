@@ -32,6 +32,10 @@ echo "--- Egress plan (ipnadmin: l plan) ---"
 printf 'l plan\nq\n' | ipnadmin
 
 echo
+echo "--- Span LTP (ltpadmin: l span) ---"
+printf 'l span\nq\n' | ltpadmin
+
+echo
 echo "--- Bundle in coda (bplist) ---"
 bplist 2>/dev/null | head -30 || echo "(bplist non disponibile)"
 

@@ -1,5 +1,10 @@
 ---
-dtnex_repo:        "https://github.com/samograsic/ion-dtn-dtnex.git"
-dtnex_version:     "main"
+dtnex_source_mode:   local     # 'local' (vendor/) oppure 'git'
+dtnex_use_prebuilt:  true
 dtnex_force_rebuild: false
-src_dir:           "/usr/local/src"
+
+dtnex_repo:    "https://github.com/samograsic/ion-dtn-dtnex.git"
+dtnex_version: "main"
+
+src_dir:    "/usr/local/src"
+vendor_dir: "/vagrant-vendor"

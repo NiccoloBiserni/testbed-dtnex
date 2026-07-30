@@ -61,6 +61,11 @@ Vagrant.configure('2') do |config|
       m.vm.hostname = node['name']
       m.vm.network 'private_network', ip: node['ip']
 
+      # Sorgenti e binari locali di ION/DTNEX (vedi vendor/README.md).
+      # Montata su OGNI nodo: ciascuno compila/installa la propria istanza.
+      # create:true evita errori se la cartella non esiste ancora sull'host.
+      m.vm.synced_folder 'vendor', '/vagrant-vendor', create: true
+
       m.vm.provider 'virtualbox' do |vb|
         vb.name   = "#{CFG['vm_name_prefix']}-#{node['name']}"
         vb.memory = CFG['memory']

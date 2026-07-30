@@ -16,29 +16,64 @@ src_dir:   "/usr/local/src"
 # 'ion'   -> ION-DTN ufficiale NASA/JPL. Compila e linka, ma il layout delle
 #            struct e' diverso: DTNEX potrebbe leggere dati incoerenti dalla
 #            shared memory. Usare solo consapevolmente.
+# Serve comunque a etichettare il marker di installazione e i messaggi di
+# log: impostalo in coerenza con cio' che hai effettivamente in vendor/.
 ion_flavor: ione
 
+# --- Provenienza dei sorgenti/binari -----------------------------------------
+# 'local' -> presi da ./vendor (nessun accesso a internet durante il
+#            provisioning). Vedi vendor/README.md per la struttura attesa.
+# 'git'   -> clonati dai repository remoti indicati sotto.
+ion_source_mode:   local
+dtnex_source_mode: local
+
+# Se true, e vendor/prebuilt contiene binari/librerie gia' compilati e
+# risultano eseguibili sulla VM (verifica automatica con file/ldd), vengono
+# copiati direttamente saltando la compilazione. In caso contrario si
+# ricompila da sorgente in automatico.
+ion_use_prebuilt:   true
+dtnex_use_prebuilt: true
+
+# Forza la ricompilazione anche se il marker di installazione e' presente
+# (utile dopo aver aggiornato vendor/ion-src o vendor/dtnex-src)
+ion_force_rebuild:   false
+dtnex_force_rebuild: false
+
+# Usati solo quando *_source_mode: git
 ione_repo:    "https://git.code.sf.net/p/ione/code"
 ione_version: "ione-1.1.0"
 
 ion_repo:     "https://github.com/nasa-jpl/ION-DTN.git"
 ion_version:  "ion-open-source-4.1.3s"
 
-ion_make_jobs:    2
-ion_extra_cflags: "-fcommon"
-
-# --- DTNEX ------------------------------------------------------------------
 dtnex_repo:    "https://github.com/samograsic/ion-dtn-dtnex.git"
 dtnex_version: "main"
 
+ion_make_jobs:    2
+ion_extra_cflags: "-fcommon"
+
+vendor_dir: "/vagrant-vendor"
+
 # --- Parametri ION ----------------------------------------------------------
-ion_udp_port:         4556
+# Convergence layer: LTP-su-UDP per il loopback (pattern standard ION, vedi
+# configs/loopback-ltp/ nei sorgenti), TCP diretto per i link fra le VM.
 ion_wm_size:          50000000     # working memory (byte)
 ion_heap_words:       20000000     # SDR heap (word da 8 byte -> ~160 MB)
 ion_config_flags:     1            # 1 = SDR in DRAM, nessuna persistenza su file
 ion_contact_datarate: 100000       # byte/s dichiarati per i contatti locali
 ion_contact_duration: 86400        # durata dei contatti locali (s)
 ion_owlt:             1            # one-way light time (s)
+ion_clock_error:      1            # 'm clockerr': tolleranza (s) su disallineamento clock
+
+ion_ltp_port:                1113  # porta UDP del link service LTP (udplso/udplsi), solo loopback
+ion_ltp_init_sessions:       128   # ltpadmin '1 <n>': dimensione hashtable sessioni export
+ion_ltp_max_export_sessions: 32
+ion_ltp_max_import_sessions: 32
+ion_ltp_segment_size:        64000
+ion_ltp_agg_size_threshold:  64000
+ion_ltp_agg_time_limit:      1
+
+ion_tcp_port:         4556         # porta TCP per i link BP fra le VM
 
 # --- Parametri DTNEX (dtnex.conf) -------------------------------------------
 dtnex_update_interval:        30       # intervallo di annuncio, basso per il testbed

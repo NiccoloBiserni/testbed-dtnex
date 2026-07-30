@@ -21,6 +21,40 @@ Servono circa 2 GB di RAM e 2 vCPU per nodo, più ~4 GB di disco per VM.
 
 ---
 
+## Sorgenti: locali o da git
+
+Per default (`ion_source_mode: local` / `dtnex_source_mode: local` in
+`group_vars/all.yml`) **nessun nodo scarica nulla da internet**: sorgenti
+(e, se presenti, binari già compilati) vengono presi dalla cartella
+`vendor/` del progetto, montata dentro ogni VM.
+
+Prima del primo `vagrant up`, popola `vendor/` con quello che hai già in
+locale — vedi **[vendor/README.md](vendor/README.md)** per la struttura
+esatta e degli esempi di comandi `cp`. In breve:
+
+```
+vendor/
+├── ion-src/            sorgenti di ION o IONe
+├── dtnex-src/          sorgenti di ion-dtn-dtnex
+└── prebuilt/           opzionale: binari/librerie gia' compilati,
+    ├── ion/            per saltare del tutto la fase di build
+    └── dtnex/
+```
+
+Se preferisci invece scaricare da git (repository e versioni già
+configurati in `group_vars/all.yml`), imposta:
+
+```yaml
+ion_source_mode:   git
+dtnex_source_mode: git
+```
+
+I binari precompilati vengono usati automaticamente solo se risultano
+eseguibili sulla VM (verifica con `file`/`ldd`); altrimenti si ricompila da
+sorgente senza intervento manuale.
+
+---
+
 ## Avvio rapido
 
 ```bash
@@ -34,10 +68,10 @@ NODES=2 vagrant up
 NODES=3 TOPOLOGY=full vagrant up
 ```
 
-La prima esecuzione compila ION da sorgente su ogni nodo: metti in conto
-15–25 minuti. Le esecuzioni successive di `vagrant provision` sono rapide,
-perché un file marker (`/usr/local/share/ion-testbed-installed`) evita la
-ricompilazione.
+Se si compila da sorgente, la prima esecuzione richiede 15–25 minuti per
+nodo. Le esecuzioni successive di `vagrant provision` sono rapide, perché
+un file marker (`/usr/local/share/ion-testbed-installed`) evita la
+ricompilazione a meno di modifiche ai sorgenti locali o `*_force_rebuild: true`.
 
 Al termine il provisioning **non avvia nulla**. Per portare su un nodo:
 
@@ -66,8 +100,9 @@ I default stanno in `config.yml` e sono sovrascrivibili da variabili d'ambiente:
 Altri parametri utili in `config.yml`: `box`, `memory`, `cpus`,
 `network_prefix`, `ip_start`, `ipn_base`.
 
-I parametri applicativi (versioni di ION e DTNEX, memoria SDR, intervalli di
-DTNEX, chiave HMAC) stanno in `group_vars/all.yml`.
+I parametri applicativi (provenienza dei sorgenti, versioni di ION e DTNEX,
+memoria SDR, porte LTP/TCP, intervalli di DTNEX, chiave HMAC) stanno in
+`group_vars/all.yml`.
 
 ### Schema di indirizzamento
 
@@ -97,6 +132,35 @@ già interamente configurata a mano.
 
 ---
 
+## Convergence layer: LTP + TCP
+
+Ogni nodo usa due convergence layer diversi a seconda della destinazione:
+
+- **Loopback (nodo verso se stesso): LTP su UDP.** È il pattern standard ION
+  per la consegna locale (vedi `configs/loopback-ltp/` nei sorgenti ION),
+  con segmentazione/ritrasmissione gestite da LTP anche se qui il link è
+  affidabile per definizione.
+- **Vicini diretti (link fra VM): TCP diretto**, sulla rete privata
+  Vagrant/VirtualBox.
+
+Questa combinazione replica la logica di un deployment reale in cui LTP si
+usa per i link co-locati/a bassa latenza e TCP per i link su IP reale fra
+macchine distinte — con la differenza che qui *ogni* vicino è su una VM
+diversa, quindi *ogni* link fra vicini passa da TCP.
+
+Porte usate (configurabili in `group_vars/all.yml`):
+
+| Parametro | Default | Uso |
+|---|---|---|
+| `ion_ltp_port` | 1113 | link service LTP (`udplso`/`udplsi`), solo loopback |
+| `ion_tcp_port` | 4556 | CLA TCP fra vicini |
+
+Se preferisci LTP anche fra le VM (non solo in loopback), è un'estensione
+possibile ma non inclusa di default: richiede uno span LTP e una porta
+dedicata per ciascun vicino diretto invece di un singolo induct TCP condiviso.
+
+---
+
 ## Struttura del progetto
 
 ```
@@ -106,17 +170,19 @@ dtnex-testbed/
 ├── ansible.cfg
 ├── site.yml                 # playbook principale
 ├── group_vars/all.yml       # versioni, percorsi, parametri ION e DTNEX
+├── vendor/                  # sorgenti/binari locali di ION e DTNEX (vedi vendor/README.md)
 └── roles/
     ├── common/              # pacchetti, /etc/hosts, sysctl IPC, chrony
-    ├── ion/                 # clone + build + install di ION/IONe
+    ├── ion/                 # installa ION/IONe: prebuilt -> sorgente locale -> git
     ├── ion_config/          # node.ionconfig, node.rc, script di gestione ION
-    ├── dtnex/               # clone + build + install di DTNEX
+    ├── dtnex/               # installa DTNEX: prebuilt -> sorgente locale -> git
     └── dtnex_config/        # dtnex.conf, script di gestione DTNEX
 ```
 
 Il provisioner Ansible è agganciato solo all'ultima VM ma gira con
 `--limit=all` e `--forks=<n>`: i ruoli vengono eseguiti su tutti i nodi in
-parallelo, così ION si compila una volta sola in termini di tempo reale.
+parallelo, così una eventuale build di ION avviene una volta sola in termini
+di tempo reale.
 
 ---
 
@@ -124,15 +190,15 @@ parallelo, così ION si compila una volta sola in termini di tempo reale.
 
 | File | Contenuto |
 |---|---|
-| `node.ionconfig` | dimensioni di working memory e SDR heap |
-| `node.rc` | file combinato per `ionstart -I`: sezioni `ionadmin`, `ionsecadmin`, `bpadmin`, `ipnadmin` |
+| `node.ionconfig` | dimensioni di working memory e SDR heap (wmKey/sdrName restano ai default di ION: vedi nota sotto) |
+| `node.rc` | file combinato per `ionstart -I`: sezioni `ionadmin`, `ionsecadmin`, `ltpadmin`, `bpadmin`, `ipnadmin` |
 | `dtnex.conf` | configurazione di DTNEX |
 | `start-ion.sh` / `stop-ion.sh` | gestione di ION |
 | `start-dtnex.sh` / `stop-dtnex.sh` | gestione di DTNEX |
-| `status.sh` | contact plan, range, egress plan, bundle in coda, metadati appresi |
+| `status.sh` | contact plan, range, span LTP, egress plan, bundle in coda, metadati appresi |
 | `test-network.sh` | `bping` verso gli altri nodi sull'endpoint echo `.12161` |
 | `contactGraph.gv` | grafo GraphViz della topologia, scritto da DTNEX |
-| `nodesmetadata.txt` | metadati dei nodi appresi via DTNEX |
+| `nodesmetadata.txt` | metadati dei nodi, generato automaticamente da DTNEX (non è un file di input: vedi sotto) |
 
 ### Cosa contiene `node.rc`
 
@@ -140,7 +206,7 @@ Solo i contatti verso i **vicini diretti**, più il contatto di loopback.
 Questo è deliberato: è il punto dell'esercizio. Tutto il resto della topologia
 deve arrivare da DTNEX.
 
-Per il nodo centrale di una catena a 3:
+Per il nodo centrale di una catena a 3 (estratto):
 
 ```
 ## begin ionadmin
@@ -154,16 +220,56 @@ a range   +1 +86400 268485002 268485001 1
 a contact +1 +86400 268485002 268485003 100000
 a contact +1 +86400 268485003 268485002 100000
 a range   +1 +86400 268485002 268485003 1
+m clockerr 1
 ## end ionadmin
+
+## begin ltpadmin
+1 128
+a span 268485002 32 32 64000 64000 1 'udplso 127.0.0.1:1113'
+s 'udplsi 0.0.0.0:1113'
+## end ltpadmin
+
+## begin bpadmin
 ...
+a protocol ltp
+a induct ltp 268485002 ltpcli
+a outduct ltp 268485002 ltpclo
+
+a protocol tcp
+a induct tcp 0.0.0.0:4556 tcpcli
+a outduct tcp 192.168.56.21:4556 ''
+a outduct tcp 192.168.56.23:4556 ''
+s
+## end bpadmin
+
 ## begin ipnadmin
-a plan 268485001 udp/192.168.56.21:4556
-a plan 268485003 udp/192.168.56.23:4556
+a plan 268485002 ltp/268485002
+a plan 268485001 tcp/192.168.56.21:4556
+a plan 268485003 tcp/192.168.56.23:4556
 ## end ipnadmin
 ```
 
 Gli endpoint `.12160` (DTNEX) e `.12161` (echo) **non** sono dichiarati:
 DTNEX li registra da sé a runtime con `addEndpoint()`.
+
+### Perché `node.ionconfig` non personalizza `wmKey`/`sdrName`
+
+ION, quando gira in modalità singolo-nodo-per-macchina (il caso normale di
+ogni VM di questo testbed), **rifiuta qualunque `wmKey`/`sdrName` diverso dal
+proprio default** — a meno di impostare la variabile d'ambiente
+`ION_NODE_LIST_DIR`, pensata per test multi-nodo su un'unica macchina, che
+qui non serve. Per questo il template lascia questi due parametri ai default
+di ION e personalizza solo `pathName`, `wmSize` e `heapWords` (che non sono
+soggetti a questa restrizione). Questo è stato verificato compilando ION
+4.1.3s da sorgente e avviandolo con la configurazione generata dal template.
+
+### `nodesmetadata.txt` non è un file di configurazione
+
+DTNEX lo apre solo in scrittura (mai in lettura): all'avvio legge il campo
+`nodemetadata` da `dtnex.conf`, registra se stesso in memoria, e da quel
+momento riscrive `nodesmetadata.txt` ogni volta che impara — da sé o dai
+vicini — nuovi metadati (a patto che `createGraph=true`). Non va quindi
+fornito come file di provisioning: si genera da solo.
 
 ---
 
@@ -209,14 +315,13 @@ dot -Tpng ~/dtn/contactGraph.gv -o /vagrant/topology.png
 vagrant provision --provision-with ansible          # tutto
 ANSIBLE_ARGS='--tags config' vagrant provision      # solo i file di configurazione
 
-# ricompilare DTNEX dopo un git pull upstream
-vagrant ssh dtn-node1 -c 'sudo ansible-playbook ... '   # oppure:
-vagrant ssh dtn-node1
-cd /usr/local/src/ion-dtn-dtnex && sudo git pull && sudo ./build_standalone.sh
-sudo cp dtnex /usr/local/bin/
+# forzare la ricompilazione dopo aver aggiornato vendor/ion-src o vendor/dtnex-src
+vagrant provision --provision-with ansible \
+  -- --extra-vars "ion_force_rebuild=true dtnex_force_rebuild=true"
 
 # ispezione a mano
 printf 'l contact\nq\n' | ionadmin
+printf 'l span\nq\n'    | ltpadmin
 printf 'l plan\nq\n'    | ipnadmin
 bplist
 ```
@@ -257,6 +362,11 @@ ion_flavor: ion              # invece di 'ione'
 ion_version: ion-open-source-4.1.3s
 ```
 
+(Le sezioni `node.rc`/LTP+TCP descritte sopra sono state effettivamente
+compilate e avviate contro ION 4.1.3s ufficiale durante lo sviluppo di questo
+testbed, per verificarne la correttezza sintattica e funzionale — non solo
+contro la documentazione.)
+
 ---
 
 ## Risoluzione dei problemi
@@ -266,7 +376,12 @@ GCC 10+ usa `-fno-common` per default. Il ruolo passa già `-fcommon` via
 `ion_extra_cflags`; se il problema persiste prova `ion_make_jobs: 1`, perché
 il build system ricorsivo di ION non è sempre parallel-safe.
 
-**`ionstart` fallisce con errori di memoria condivisa.**
+**`ionstart` fallisce con `Config parms wmKey != default` o `sdrName != default`.**
+Qualcosa ha reintrodotto un `wmKey`/`sdrName` personalizzato in
+`node.ionconfig`: su una VM a singolo nodo vanno lasciati ai default di ION
+(vedi la nota dedicata più sopra).
+
+**`ionstart` fallisce con altri errori di memoria condivisa.**
 Quasi sempre residui di un'istanza precedente. Esegui `./stop-ion.sh`, che
 chiama `ionstop` e poi `killm`. Se non basta: `ipcs -m` e `ipcrm`.
 
@@ -289,9 +404,14 @@ Controlla che `./start-ion.sh` abbia effettivamente caricato il contact plan
 (`printf 'l contact\nq\n' | ionadmin` non deve essere vuoto).
 
 **Un nodo non riceve i bundle.**
-Verifica che l'induct UDP sia in ascolto (`ss -ulnp | grep 4556`) e che la
+Verifica che l'induct TCP sia in ascolto (`ss -tlnp | grep 4556`) e che la
 rete host-only sia raggiungibile (`ping dtn-node2`). Ubuntu cloud image non
 ha ufw attivo per default, ma vale la pena controllarlo.
+
+**Vendor vuota all'avvio del provisioning.**
+Con `ion_source_mode: local` (default) e `vendor/ion-src` (o `dtnex-src`)
+vuota, il ruolo fallisce con un messaggio esplicito che rimanda a
+`vendor/README.md`. Popola la cartella o passa a `ion_source_mode: git`.
 
 ---
 

@@ -21,6 +21,8 @@
       - net-tools
       - tcpdump
       - psmisc
+      - rsync               # sincronizzazione dei sorgenti locali (vendor/)
+      - file                # rilevamento del tipo di binario (vendor/prebuilt)
     state: present
 
 - name: Abilita e avvia chrony

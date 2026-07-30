@@ -1,7 +1,9 @@
 {{ ansible_managed | comment }}
-{# Configurazione della memoria di ION per {{ node_self.name }} (ipn:{{ node_self.ipn }}) #}
-wmKey       {{ 65000 + node_self.index }}
-sdrName     ion{{ node_self.index }}
+{# Configurazione della memoria di ION per {{ node_self.name }} (ipn:{{ node_self.ipn }})
+   wmKey e sdrName NON vengono personalizzati: ogni VM esegue un solo nodo ION,
+   quindi valgono i default di ION (wmKey 65281, sdrName "ion"). Un valore
+   diverso dal default e' accettato solo in modalita' multi-nodo-per-macchina
+   (variabile d'ambiente ION_NODE_LIST_DIR), che qui non serve. #}
 wmSize      {{ ion_wm_size }}
 configFlags {{ ion_config_flags }}
 heapWords   {{ ion_heap_words }}

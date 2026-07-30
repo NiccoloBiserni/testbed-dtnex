@@ -3,12 +3,16 @@
 # Configurazione ION per {{ node_self.name }}  ->  ipn:{{ node_self.ipn }} ({{ node_self.ip }})
 # Topologia: {{ dtn_topology }} | vicini diretti: {{ node_neighbors | map(attribute='ipn') | join(', ') if node_neighbors else 'nessuno' }}
 #
-# File combinato per `ionstart -I node.rc`. Le sezioni vengono estratte e
-# passate ai rispettivi admin program nell'ordine:
-#   ionadmin -> ionsecadmin -> bpadmin -> ipnadmin
+# File combinato per `ionstart -I node.rc`. ionstart invoca gli admin program
+# in un ordine FISSO indipendente da come sono disposte le sezioni nel file
+# (vedi ionstart.awk): ionadmin -> ionsecadmin -> ltpadmin -> bpadmin -> ipnadmin.
 #
-# NOTA: qui sono dichiarati SOLO i contatti verso i vicini diretti.
-# Tutto il resto della topologia viene appreso a runtime da DTNEX.
+# Convergence layer:
+#   - LOOPBACK (nodo verso se stesso): LTP su UDP, pattern standard ION
+#     (vedi configs/loopback-ltp/ nei sorgenti ION).
+#   - VICINI DIRETTI (link fra VM):    TCP diretto sulla rete privata.
+# Solo i contatti verso i vicini diretti sono dichiarati qui: tutto il resto
+# della topologia viene appreso a runtime da DTNEX.
 
 ## begin ionadmin
 # Inizializzazione del nodo con i parametri di memoria
@@ -28,12 +32,25 @@ a contact +1 +{{ ion_contact_duration }} {{ node_self.ipn }} {{ nb.ipn }} {{ ion
 a contact +1 +{{ ion_contact_duration }} {{ nb.ipn }} {{ node_self.ipn }} {{ ion_contact_datarate }}
 a range   +1 +{{ ion_contact_duration }} {{ node_self.ipn }} {{ nb.ipn }} {{ ion_owlt }}
 {% endfor %}
+
+# Tolleranza sul disallineamento di clock fra i nodi (default ION: 1s)
+m clockerr {{ ion_clock_error }}
 ## end ionadmin
 
 ## begin ionsecadmin
 # Inizializzazione del database di sicurezza (richiesta anche se non si usa BPSec)
 1
 ## end ionsecadmin
+
+## begin ltpadmin
+# LTP e' usato SOLO per il loopback (nodo verso se stesso): e' il pattern
+# standard ION per la consegna locale (vedi configs/loopback-ltp/), con
+# ritrasmissione/segmentazione gestite da LTP anche se qui il link e'
+# affidabile per definizione. I vicini reali usano TCP (sezione bpadmin).
+1 {{ ion_ltp_init_sessions }}
+a span {{ node_self.ipn }} {{ ion_ltp_max_export_sessions }} {{ ion_ltp_max_import_sessions }} {{ ion_ltp_segment_size }} {{ ion_ltp_agg_size_threshold }} {{ ion_ltp_agg_time_limit }} 'udplso 127.0.0.1:{{ ion_ltp_port }}'
+s 'udplsi 0.0.0.0:{{ ion_ltp_port }}'
+## end ltpadmin
 
 ## begin bpadmin
 # Inizializzazione del Bundle Protocol
@@ -53,11 +70,16 @@ a endpoint ipn:{{ node_self.ipn }}.4 q
 a endpoint ipn:{{ node_self.ipn }}.64 q
 a endpoint ipn:{{ node_self.ipn }}.65 q
 
-# Convergence layer UDP
-a protocol udp 1400 100
-a induct udp 0.0.0.0:{{ ion_udp_port }} udpcli
+# --- LTP: solo loopback ---
+a protocol ltp
+a induct ltp {{ node_self.ipn }} ltpcli
+a outduct ltp {{ node_self.ipn }} ltpclo
+
+# --- TCP: link verso i vicini diretti ---
+a protocol tcp
+a induct tcp 0.0.0.0:{{ ion_tcp_port }} tcpcli
 {% for nb in node_neighbors %}
-a outduct udp {{ nb.ip }}:{{ ion_udp_port }} udpclo
+a outduct tcp {{ nb.ip }}:{{ ion_tcp_port }} ''
 {% endfor %}
 
 # Avvio dei demoni BP
@@ -65,9 +87,10 @@ s
 ## end bpadmin
 
 ## begin ipnadmin
-# Egress plan verso i vicini diretti.
+# Egress plan: loopback via LTP, vicini diretti via TCP.
 # DTNEX legge questa lista per sapere a chi inoltrare i propri messaggi.
+a plan {{ node_self.ipn }} ltp/{{ node_self.ipn }}
 {% for nb in node_neighbors %}
-a plan {{ nb.ipn }} udp/{{ nb.ip }}:{{ ion_udp_port }}
+a plan {{ nb.ipn }} tcp/{{ nb.ip }}:{{ ion_tcp_port }}
 {% endfor %}
 ## end ipnadmin

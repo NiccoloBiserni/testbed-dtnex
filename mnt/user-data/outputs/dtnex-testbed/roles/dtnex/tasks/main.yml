@@ -1,56 +1,191 @@
 ---
-# Compilazione e installazione di DTNEX.
-# Si usa build_standalone.sh, che compila con gli header ION inclusi nel
-# repository e linka contro le librerie di sistema libbp/libici.
-# L'installazione viene fatta con una copia esplicita invece di `make install`
-# perche' il target `install` del Makefile dipende da header ION esterni.
+# Installazione di DTNEX, in ordine di preferenza:
+#   1. binario precompilato in vendor/prebuilt/dtnex (se dtnex_use_prebuilt
+#      e risulta eseguibile su questa VM)
+#   2. sorgenti locali in vendor/dtnex-src (dtnex_source_mode: local)
+#   3. clone da git (dtnex_source_mode: git)
+#
+# La build usa build_standalone.sh, che compila con gli header ION inclusi
+# nel repository stesso e linka contro le librerie di sistema libbp/libici
+# (installate dal ruolo 'ion' prima di questo).
 
-- name: Definisce il percorso dei sorgenti DTNEX
+- name: Definisce i percorsi usati dal ruolo
   ansible.builtin.set_fact:
-    dtnex_src_path: "{{ src_dir }}/ion-dtn-dtnex"
+    dtnex_marker:     "/usr/local/share/dtnex-testbed-installed"
+    dtnex_build_path: "{{ src_dir }}/ion-dtn-dtnex"
 
-- name: Clona i sorgenti DTNEX
-  ansible.builtin.git:
-    repo: "{{ dtnex_repo }}"
-    dest: "{{ dtnex_src_path }}"
-    version: "{{ dtnex_version }}"
-    force: true
-  register: dtnex_clone
-  retries: 3
-  delay: 5
-  until: dtnex_clone is succeeded
+- name: Calcola l'identificativo di versione atteso (per il marker di idempotenza)
+  ansible.builtin.set_fact:
+    dtnex_marker_expected: >-
+      {{ dtnex_source_mode }}:{{ 'local' if dtnex_source_mode == 'local' else dtnex_version }}
 
-- name: Verifica la presenza del binario gia' installato
+# ---------------------------------------------------------------------------
+# 1) Binario precompilato (vendor/prebuilt/dtnex)
+# ---------------------------------------------------------------------------
+
+- name: Verifica la presenza del binario dtnex precompilato in vendor/
   ansible.builtin.stat:
-    path: /usr/local/bin/dtnex
-  register: dtnex_bin
+    path: "{{ vendor_dir }}/prebuilt/dtnex/dtnex"
+  register: dtnex_prebuilt_stat
+  when: dtnex_source_mode == 'local' and dtnex_use_prebuilt
 
-- name: Rende eseguibile build_standalone.sh
-  ansible.builtin.file:
-    path: "{{ dtnex_src_path }}/build_standalone.sh"
-    mode: "0755"
+- name: Installa il binario dtnex precompilato
+  when: >-
+    dtnex_source_mode == 'local' and dtnex_use_prebuilt
+    and dtnex_prebuilt_stat.stat is defined and dtnex_prebuilt_stat.stat.exists
+  block:
 
-- name: Compila DTNEX
-  ansible.builtin.command:
-    cmd: ./build_standalone.sh
-    chdir: "{{ dtnex_src_path }}"
-  register: dtnex_build
-  changed_when: true
-  when: dtnex_clone.changed or dtnex_force_rebuild or not dtnex_bin.stat.exists
+    - name: Copia il binario precompilato in /usr/local/bin
+      ansible.builtin.copy:
+        src: "{{ vendor_dir }}/prebuilt/dtnex/dtnex"
+        dest: /usr/local/bin/dtnex
+        remote_src: true
+        mode: "0755"
+        owner: root
+        group: root
 
-- name: Mostra l'output della build in caso di errore
+    - name: Verifica il tipo di file del binario copiato
+      ansible.builtin.command: file /usr/local/bin/dtnex
+      register: dtnex_prebuilt_file
+      changed_when: false
+
+    - name: Verifica che le librerie dinamiche siano risolvibili
+      ansible.builtin.command: ldd /usr/local/bin/dtnex
+      register: dtnex_prebuilt_ldd
+      changed_when: false
+      failed_when: false
+
+    - name: Determina se il binario precompilato e' realmente utilizzabile
+      ansible.builtin.set_fact:
+        dtnex_prebuilt_ok: >-
+          {{ ('ELF' in dtnex_prebuilt_file.stdout)
+             and (dtnex_prebuilt_ldd.rc == 0)
+             and ('not found' not in dtnex_prebuilt_ldd.stdout) }}
+
+    - name: Segnala che il binario precompilato non e' compatibile con questa VM
+      ansible.builtin.debug:
+        msg: >-
+          Il binario in vendor/prebuilt/dtnex non risulta eseguibile su
+          questa VM (architettura, libc o link contro libbp/libici diversi).
+          Si procede con la compilazione da sorgente.
+      when: not dtnex_prebuilt_ok
+
+    - name: Scrive il marker di installazione (prebuilt)
+      ansible.builtin.copy:
+        dest: "{{ dtnex_marker }}"
+        content: "prebuilt:prebuilt\n"
+        mode: "0644"
+      when: dtnex_prebuilt_ok
+
+- name: Imposta a false l'esito prebuilt se la fase e' stata saltata
+  ansible.builtin.set_fact:
+    dtnex_prebuilt_ok: "{{ dtnex_prebuilt_ok | default(false) }}"
+
+# ---------------------------------------------------------------------------
+# 2) Compilazione da sorgente (locale o git), solo se il prebuilt non e' ok
+# ---------------------------------------------------------------------------
+
+- name: Verifica il marker di build esistente
+  ansible.builtin.slurp:
+    src: "{{ dtnex_marker }}"
+  register: dtnex_marker_content
+  failed_when: false
+  when: not dtnex_prebuilt_ok
+
+- name: Determina se la compilazione da sorgente e' necessaria
+  ansible.builtin.set_fact:
+    dtnex_needs_build: >-
+      {{ (not dtnex_prebuilt_ok) and (
+         dtnex_force_rebuild
+         or dtnex_marker_content.content is not defined
+         or (dtnex_marker_content.content | b64decode | trim) != dtnex_marker_expected
+      ) }}
+
+- name: DTNEX gia' installato, nessuna azione necessaria
   ansible.builtin.debug:
-    var: dtnex_build.stdout_lines
-  when: dtnex_build is failed
+    msg: "DTNEX gia' installato ({{ 'binario precompilato' if dtnex_prebuilt_ok else 'build precedente' }}); nessuna azione."
+  when: not dtnex_prebuilt_ok and not dtnex_needs_build
 
-- name: Installa il binario dtnex in /usr/local/bin
-  ansible.builtin.copy:
-    src: "{{ dtnex_src_path }}/dtnex"
-    dest: /usr/local/bin/dtnex
-    remote_src: true
-    mode: "0755"
-    owner: root
-    group: root
+- name: Blocco di compilazione DTNEX da sorgente
+  when: dtnex_needs_build
+  block:
+
+    - name: "[local] Verifica che vendor/dtnex-src non sia vuota"
+      ansible.builtin.find:
+        paths: "{{ vendor_dir }}/dtnex-src"
+        file_type: file
+      register: dtnex_vendor_src_files
+      when: dtnex_source_mode == 'local'
+
+    - name: "[local] Errore se vendor/dtnex-src e' vuota"
+      ansible.builtin.fail:
+        msg: >-
+          vendor/dtnex-src e' vuota. Copia li' i sorgenti di ion-dtn-dtnex
+          (vedi vendor/README.md), oppure imposta dtnex_source_mode: git.
+      when: dtnex_source_mode == 'local' and dtnex_vendor_src_files.matched <= 1
+
+    - name: "[local] Sincronizza i sorgenti da vendor/dtnex-src"
+      ansible.builtin.command:
+        cmd: >-
+          rsync -a --delete
+          --exclude='.git' --exclude='*.o' --exclude='.vagrant'
+          {{ vendor_dir }}/dtnex-src/ {{ dtnex_build_path }}/
+      changed_when: true
+      when: dtnex_source_mode == 'local'
+
+    - name: "[git] Clona i sorgenti DTNEX"
+      ansible.builtin.git:
+        repo: "{{ dtnex_repo }}"
+        dest: "{{ dtnex_build_path }}"
+        version: "{{ dtnex_version }}"
+        force: true
+      register: dtnex_clone
+      retries: 3
+      delay: 5
+      until: dtnex_clone is succeeded
+      when: dtnex_source_mode == 'git'
+
+    - name: Rende eseguibile build_standalone.sh
+      ansible.builtin.file:
+        path: "{{ dtnex_build_path }}/build_standalone.sh"
+        mode: "0755"
+
+    - name: Rimuove eventuali binari residui di build precedenti
+      ansible.builtin.file:
+        path: "{{ dtnex_build_path }}/{{ item }}"
+        state: absent
+      loop: [dtnex, dtnex.o]
+
+    - name: Compila DTNEX
+      ansible.builtin.command:
+        cmd: ./build_standalone.sh
+        chdir: "{{ dtnex_build_path }}"
+      register: dtnex_build
+      changed_when: true
+
+    - name: Mostra l'output della build in caso di errore
+      ansible.builtin.debug:
+        var: dtnex_build.stdout_lines
+      when: dtnex_build is failed
+
+    - name: Installa il binario dtnex in /usr/local/bin
+      ansible.builtin.copy:
+        src: "{{ dtnex_build_path }}/dtnex"
+        dest: /usr/local/bin/dtnex
+        remote_src: true
+        mode: "0755"
+        owner: root
+        group: root
+
+    - name: Scrive il marker di installazione
+      ansible.builtin.copy:
+        dest: "{{ dtnex_marker }}"
+        content: "{{ dtnex_marker_expected }}\n"
+        mode: "0644"
+
+# ---------------------------------------------------------------------------
+# 3) Verifica finale (in ogni caso: prebuilt, build locale o build git)
+# ---------------------------------------------------------------------------
 
 - name: Verifica che dtnex sia linkato correttamente
   ansible.builtin.shell:

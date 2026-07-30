@@ -1,76 +1,215 @@
 ---
-# Compilazione e installazione di ION (o IONe) da sorgente in /usr/local.
-# Idempotente: un file marker registra flavor+versione gia' installati.
+# Installazione di ION (o IONe), in ordine di preferenza:
+#   1. binari/librerie precompilati in vendor/prebuilt/ion (se ion_use_prebuilt
+#      e risultano eseguibili su questa VM)
+#   2. sorgenti locali in vendor/ion-src (ion_source_mode: local)
+#   3. clone da git (ion_source_mode: git)
+# Idempotente tramite un file marker.
 
-- name: Normalizza i parametri del flavor scelto
+- name: Definisce i percorsi usati dal ruolo
   ansible.builtin.set_fact:
-    ion_src_repo: "{{ ione_repo if ion_flavor == 'ione' else ion_repo }}"
-    ion_src_ref:  "{{ ione_version if ion_flavor == 'ione' else ion_version }}"
-    ion_src_path: "{{ src_dir }}/{{ 'ione-code' if ion_flavor == 'ione' else 'ion-dtn' }}"
-    ion_marker:   "/usr/local/share/ion-testbed-installed"
+    ion_marker:     "/usr/local/share/ion-testbed-installed"
+    ion_build_path: "{{ src_dir }}/{{ 'ione-code' if ion_flavor == 'ione' else 'ion-dtn' }}"
 
-- name: Verifica se ION e' gia' installato alla versione richiesta
+- name: Calcola l'identificativo di versione atteso (per il marker di idempotenza)
+  ansible.builtin.set_fact:
+    ion_marker_expected: >-
+      {{ ion_flavor }}:{{ ion_source_mode }}:{{
+        'local' if ion_source_mode == 'local'
+        else (ione_version if ion_flavor == 'ione' else ion_version)
+      }}
+
+# ---------------------------------------------------------------------------
+# 1) Binari/librerie precompilati (vendor/prebuilt/ion)
+# ---------------------------------------------------------------------------
+
+- name: Verifica la presenza di binari ION precompilati in vendor/
+  ansible.builtin.stat:
+    path: "{{ vendor_dir }}/prebuilt/ion/bin/ionadmin"
+  register: ion_prebuilt_stat
+  when: ion_source_mode == 'local' and ion_use_prebuilt
+
+- name: Installa i binari/librerie ION precompilati
+  when: >-
+    ion_source_mode == 'local' and ion_use_prebuilt
+    and ion_prebuilt_stat.stat is defined and ion_prebuilt_stat.stat.exists
+  block:
+
+    - name: Copia i binari precompilati in /usr/local/bin
+      ansible.builtin.copy:
+        src: "{{ vendor_dir }}/prebuilt/ion/bin/"
+        dest: /usr/local/bin/
+        remote_src: true
+        mode: "0755"
+        owner: root
+        group: root
+
+    - name: Copia le librerie precompilate in /usr/local/lib
+      ansible.builtin.copy:
+        src: "{{ vendor_dir }}/prebuilt/ion/lib/"
+        dest: /usr/local/lib/
+        remote_src: true
+        mode: "0755"
+        owner: root
+        group: root
+
+    - name: Verifica se sono presenti header precompilati
+      ansible.builtin.find:
+        paths: "{{ vendor_dir }}/prebuilt/ion/include"
+        patterns: "*.h"
+      register: ion_prebuilt_headers
+
+    - name: Copia gli header precompilati in /usr/local/include (se presenti)
+      ansible.builtin.copy:
+        src: "{{ vendor_dir }}/prebuilt/ion/include/"
+        dest: /usr/local/include/
+        remote_src: true
+        mode: "0644"
+        owner: root
+        group: root
+      when: ion_prebuilt_headers.matched > 0
+
+    - name: Aggiorna la cache del linker
+      ansible.builtin.command: ldconfig
+      changed_when: true
+
+    - name: Verifica il tipo di file del binario copiato
+      ansible.builtin.command: file /usr/local/bin/ionadmin
+      register: ion_prebuilt_file
+      changed_when: false
+
+    - name: Verifica che le librerie dinamiche siano risolvibili
+      ansible.builtin.command: ldd /usr/local/bin/ionadmin
+      register: ion_prebuilt_ldd
+      changed_when: false
+      failed_when: false
+
+    - name: Determina se i binari precompilati sono realmente utilizzabili
+      ansible.builtin.set_fact:
+        ion_prebuilt_ok: >-
+          {{ ('ELF' in ion_prebuilt_file.stdout)
+             and (ion_prebuilt_ldd.rc == 0)
+             and ('not found' not in ion_prebuilt_ldd.stdout) }}
+
+    - name: Segnala che i binari precompilati non sono compatibili con questa VM
+      ansible.builtin.debug:
+        msg: >-
+          I binari in vendor/prebuilt/ion non risultano eseguibili su questa
+          VM (architettura o libc diversa). Si procede con la compilazione
+          da sorgente.
+      when: not ion_prebuilt_ok
+
+    - name: Scrive il marker di installazione (prebuilt)
+      ansible.builtin.copy:
+        dest: "{{ ion_marker }}"
+        content: "{{ ion_flavor }}:prebuilt:prebuilt\n"
+        mode: "0644"
+      when: ion_prebuilt_ok
+
+- name: Imposta a false l'esito prebuilt se la fase e' stata saltata
+  ansible.builtin.set_fact:
+    ion_prebuilt_ok: "{{ ion_prebuilt_ok | default(false) }}"
+
+# ---------------------------------------------------------------------------
+# 2) Compilazione da sorgente (locale o git), solo se il prebuilt non e' ok
+# ---------------------------------------------------------------------------
+
+- name: Verifica il marker di build esistente
   ansible.builtin.slurp:
     src: "{{ ion_marker }}"
   register: ion_marker_content
   failed_when: false
+  when: not ion_prebuilt_ok
 
-- name: Determina se la build e' necessaria
+- name: Determina se la compilazione da sorgente e' necessaria
   ansible.builtin.set_fact:
     ion_needs_build: >-
-      {{ ion_force_rebuild
+      {{ (not ion_prebuilt_ok) and (
+         ion_force_rebuild
          or ion_marker_content.content is not defined
-         or (ion_marker_content.content | b64decode | trim) != (ion_flavor ~ ':' ~ ion_src_ref) }}
+         or (ion_marker_content.content | b64decode | trim) != ion_marker_expected
+      ) }}
 
-- name: ION gia' presente, build saltata
+- name: ION gia' installato, nessuna azione necessaria
   ansible.builtin.debug:
-    msg: "ION {{ ion_flavor }}:{{ ion_src_ref }} gia' installato, nessuna ricompilazione."
-  when: not ion_needs_build
+    msg: "ION ({{ ion_flavor }}) gia' installato ({{ 'binari precompilati' if ion_prebuilt_ok else 'build precedente' }}); nessuna azione."
+  when: not ion_prebuilt_ok and not ion_needs_build
 
-- name: Blocco di build ION
+- name: Blocco di compilazione ION da sorgente
   when: ion_needs_build
   block:
 
-    - name: Clona i sorgenti ION ({{ ion_flavor }} {{ ion_src_ref }})
+    - name: "[local] Verifica che vendor/ion-src non sia vuota"
+      ansible.builtin.find:
+        paths: "{{ vendor_dir }}/ion-src"
+        file_type: file
+      register: ion_vendor_src_files
+      when: ion_source_mode == 'local'
+
+    - name: "[local] Errore se vendor/ion-src e' vuota"
+      ansible.builtin.fail:
+        msg: >-
+          vendor/ion-src e' vuota. Copia li' i sorgenti di ION/IONe
+          (vedi vendor/README.md), oppure imposta ion_source_mode: git.
+      when: ion_source_mode == 'local' and ion_vendor_src_files.matched <= 1
+
+    - name: "[local] Sincronizza i sorgenti da vendor/ion-src"
+      ansible.builtin.command:
+        cmd: >-
+          rsync -a --delete
+          --exclude='.git' --exclude='*.o' --exclude='.vagrant'
+          {{ vendor_dir }}/ion-src/ {{ ion_build_path }}/
+      changed_when: true
+      when: ion_source_mode == 'local'
+
+    - name: "[git] Clona i sorgenti ION ({{ ion_flavor }})"
       ansible.builtin.git:
-        repo: "{{ ion_src_repo }}"
-        dest: "{{ ion_src_path }}"
-        version: "{{ ion_src_ref }}"
+        repo: "{{ ione_repo if ion_flavor == 'ione' else ion_repo }}"
+        dest: "{{ ion_build_path }}"
+        version: "{{ ione_version if ion_flavor == 'ione' else ion_version }}"
         depth: 1
         force: true
       register: ion_clone
       retries: 3
       delay: 10
       until: ion_clone is succeeded
+      when: ion_source_mode == 'git'
 
     - name: Verifica la presenza dello script configure
       ansible.builtin.stat:
-        path: "{{ ion_src_path }}/configure"
+        path: "{{ ion_build_path }}/configure"
       register: ion_configure
 
     - name: Genera lo script configure con autoreconf
       ansible.builtin.command:
         cmd: autoreconf -fi
-        chdir: "{{ ion_src_path }}"
+        chdir: "{{ ion_build_path }}"
       when: not ion_configure.stat.exists
       changed_when: true
 
     - name: Esegue ./configure
       ansible.builtin.command:
         cmd: ./configure CFLAGS="-g -O2 {{ ion_extra_cflags }}"
-        chdir: "{{ ion_src_path }}"
-        creates: "{{ ion_src_path }}/Makefile"
+        chdir: "{{ ion_build_path }}"
+
+    - name: Pulisce eventuali artefatti di build precedenti (sorgente locale)
+      ansible.builtin.command:
+        cmd: make clean
+        chdir: "{{ ion_build_path }}"
+      changed_when: true
+      failed_when: false
+      when: ion_source_mode == 'local'
 
     - name: Compila ION (puo' richiedere diversi minuti)
       ansible.builtin.command:
         cmd: "make -j{{ ion_make_jobs }}"
-        chdir: "{{ ion_src_path }}"
+        chdir: "{{ ion_build_path }}"
       changed_when: true
 
     - name: Installa ION in /usr/local
       ansible.builtin.command:
         cmd: make install
-        chdir: "{{ ion_src_path }}"
+        chdir: "{{ ion_build_path }}"
       changed_when: true
 
     - name: Aggiorna la cache del linker
@@ -80,15 +219,19 @@
     - name: Scrive il marker di installazione
       ansible.builtin.copy:
         dest: "{{ ion_marker }}"
-        content: "{{ ion_flavor }}:{{ ion_src_ref }}\n"
+        content: "{{ ion_marker_expected }}\n"
         mode: "0644"
+
+# ---------------------------------------------------------------------------
+# 3) Verifica finale (in ogni caso: prebuilt, build locale o build git)
+# ---------------------------------------------------------------------------
 
 - name: Verifica che i binari ION siano nel PATH
   ansible.builtin.command: "which {{ item }}"
   loop: [ionadmin, bpadmin, ipnadmin, ionstart, ionstop, killm, bping, bpsink, bpsource]
   changed_when: false
 
-- name: Verifica che libbp e libici siano linkabili
+- name: Verifica che libbp e libici siano presenti
   ansible.builtin.stat:
     path: "/usr/local/lib/{{ item }}"
   register: ion_libs
