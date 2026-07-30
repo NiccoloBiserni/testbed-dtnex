@@ -1,0 +1,7 @@
+bpv7/utils/libbp_la-jsmn.lo: bpv7/utils/jsmn.c /usr/include/stdc-predef.h \
+ config.h bpv7/utils/jsmn.h \
+ /usr/lib/gcc/x86_64-linux-gnu/13/include/stddef.h
+/usr/include/stdc-predef.h:
+config.h:
+bpv7/utils/jsmn.h:
+/usr/lib/gcc/x86_64-linux-gnu/13/include/stddef.h:

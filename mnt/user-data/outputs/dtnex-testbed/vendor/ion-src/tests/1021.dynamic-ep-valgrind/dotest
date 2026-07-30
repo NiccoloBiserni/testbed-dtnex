@@ -1,0 +1,263 @@
+#!/bin/bash
+#
+# Copyright (c) 2009, Regents of the University of Colorado.
+#
+# Written by Andrew Jenkins and Sebastian Kuzminsky, based on loopbacktest.sh by David Young
+#
+
+echo "########################################"
+echo
+pwd | sed "s/\/.*\///" | xargs echo "NAME: "
+echo
+echo "PURPOSE: To send 5 bundles with bundle report back from one BP endpoint
+	to another over UDP.  Uses the valgrind debugging/profiling tool:
+	http://valgrind.org/"
+
+echo "OUTPUT: Various debugging messages associated with the valgrind tool.
+	valgrind output files will follow the pattern:
+	$PWD/out.valgrind..."
+echo
+echo "########################################"
+
+ITERATIONGOAL=5
+
+predictreceived () {
+#    EXLENGTH=`expr ${#1} + 1`
+#    echo "ION event: Payload delivered."
+#    echo "	payload length is ${EXLENGTH}."
+    echo "	'${1}'"
+}
+
+compare_files() {
+    local fileA=$1
+    local fileB=$2
+
+    # Check if both files exist
+    if [[ ! -f "$fileA" || ! -f "$fileB" ]]; then
+        echo "One or both files do not exist."
+        return 1
+    fi
+
+    local missing_lines=0
+
+    # Check each line in fileA
+    while IFS= read -r line
+    do
+        # Use grep to check if the line is in fileB
+        if ! grep -Fxq "$line" "$fileB"
+        then
+            echo "Line not found in $fileB: $line"
+            missing_lines=$((missing_lines + 1))
+        fi
+    done < "$fileA"
+
+    if [[ $missing_lines -eq 0 ]]; then
+        echo "All lines in $fileA are present in $fileB."
+        return 0
+    else
+        echo "$missing_lines line(s) from $fileA are not present in $fileB."
+        return 1
+    fi
+}
+
+# Try 10 times to see if the bundle has been received.
+tryreceive () {
+    # each 'tryreceive' is an iteration
+    # each iteration will cycle 200 x 0.04 seconds
+    X=0
+    while [ $X -lt 200 ]
+    do
+        # sleep and kill process in case it didn't end properly
+        sleep 0.04 
+
+        # Check if bpsink got the file.
+        if ! compare_files $IONEXPECTEDFILE $IONRECEIVEFILE 
+        then
+            X=`expr $X + 1`
+        else
+            # We received it.  Hooray.
+            echo "Received it!"
+            return 0
+        fi
+    done
+    # We didn't receive it, even after 200 tries; bummer.
+    echo "Try to receive but failed. Here is the difference between received and expected" 
+    diff $IONRECEIVEFILE $IONEXPECTEDFILE
+    return 1
+}
+
+
+# message sent over ion
+IONMESSAGE="iontestmessage"
+IONSENDFILE=./ionsendfile.txt
+IONRECEIVEFILE=./ionreceivefile.txt
+IONEXPECTEDFILE=./ionexpectedfile.txt
+
+echo "Killing old ION..."
+killm
+sleep 1
+
+if ! which valgrind > /dev/null 2> /dev/null; then
+    echo "valgrind not found, skipping test"
+    exit 2
+fi
+
+# uncomment the second line here if you want valgrind to emit suppressions for you
+GEN_SUPPRESSIONS=""
+#GEN_SUPPRESSIONS="--gen-suppressions=all"
+
+# clean up any old valgrind output files
+rm -f out.valgrind.* 2>/dev/null
+
+#clean up any old test i/o files
+rm $IONSENDFILE $IONRECEIVEFILE $IONEXPECTEDFILE 2>/dev/null
+
+echo "Starting ION..."
+echo "IONDIR = $IONDIR"
+CONFIGDIR="./config"
+libtool --mode=execute                             \
+    valgrind                                       \
+    $GEN_SUPPRESSIONS                              \
+    --suppressions=valgrind.suppressions.ionstart  \
+    --quiet                                        \
+    --log-file=out.valgrind.loopback.ionstart.%p   \
+    --num-callers=25                               \
+    --tool=memcheck                                \
+    --trace-children=yes                           \
+    --leak-check=full                              \
+    $IONDIR/ionstart                               \
+        -I $CONFIGDIR/host1.rc                     
+
+# pause here to test configuration
+#read -n 1 -s -r -p "Script paused. Press any key to continue..."
+
+
+# Send a bundle to an endpoint that hasn't been created.  This bundle
+# should be discarded.
+echo "Sending initial discard bundle..."
+echo "$( date )" > $IONSENDFILE
+echo "!" >> $IONSENDFILE
+libtool --mode=execute                             \
+    valgrind                                       \
+    $GEN_SUPPRESSIONS                              \
+    --quiet                                        \
+    --log-file=out.valgrind.loopback.bpsource.%p     \
+    --num-callers=25                               \
+    --tool=memcheck                                \
+    --trace-children=yes                           \
+    --leak-check=full                              \
+    $IONDIR/bpsource ipn:1.4 -t3 < $IONSENDFILE
+sleep 10
+
+# Start the listener that will receive all the bundles.  This listener
+# should listen on an endpoint that hasn't been created.
+echo "Starting Message Listener..."
+libtool --mode=execute                             \
+    valgrind                                       \
+    $GEN_SUPPRESSIONS                              \
+    --quiet                                        \
+    --log-file=out.valgrind.loopback.bpsink.%p     \
+    --num-callers=25                               \
+    --tool=memcheck                                \
+    --trace-children=yes                           \
+    --leak-check=full                              \
+    $IONDIR/bpsink ipn:1.4 >> $IONRECEIVEFILE &
+BPSINKPID=$!
+
+# give bpsink some time to start up
+sleep 5
+
+# set success iteration count to zero
+ITERATION=0
+
+sleep 2
+
+echo "Start trying to receive up to $ITERATIONGOAL times."
+
+while [[ $ITERATION -le $ITERATIONGOAL ]]
+do
+    echo "Create the test message to send; save message for comparison."
+    IONMESSAGE=$( date )
+    predictreceived "$IONMESSAGE" >> $IONEXPECTEDFILE
+
+    echo "Starting bptrace..."
+    libtool --mode=execute                             \
+        valgrind                                       \
+        $GEN_SUPPRESSIONS                              \
+        --quiet                                        \
+        --log-file=out.valgrind.loopback.bptrace.%p     \
+        --num-callers=25                               \
+        --tool=memcheck                                \
+        --trace-children=yes                           \
+        --leak-check=full                              \
+        $IONDIR/bptrace ipn:1.2 ipn:1.4 ipn:1.2 8 1.0 "$IONMESSAGE" 31
+
+    if tryreceive 
+    then
+        echo -n "."
+        ITERATION=`expr $ITERATION + 1`
+        echo "Succeeded for $ITERATION iteration(s)."
+    else
+        echo "Failed an iteration"
+        break
+    fi
+    
+#    read -n 1 -s -r -p "Script paused. Press any key to continue..."
+
+done
+
+echo ""
+
+# bpsink does not self-terminate, so send it SIGINT
+echo "Stopping bpsink"
+kill -2 $BPSINKPID >/dev/null 2>&1
+sleep 1
+kill -9 $BPSINKPID >/dev/null 2>&1
+
+# shut down ion processes
+echo "Stopping ion..."
+ionstop
+
+if [[ "$ITERATION" -eq $((ITERATIONGOAL + 1)) ]]; then
+    echo "Completed $((ITERATION - 1)) iterations successfully, meets iteration goal of 5."
+    RETVAL=0
+else
+    echo "Did not complete iteration goals of 5 tries. Test failed."
+    RETVAL=1
+fi
+
+
+# Shutdown all valgrind processes
+# Pattern to match the Valgrind processes
+pattern="valgrind(\.bin)? --suppressions=valgrind.suppressions.ionstart"
+
+# Use pgrep with full pattern matching to find PIDs of processes matching the pattern
+pids=$(pgrep -f "$pattern")
+
+# Check if any PIDs were found
+if [ -z "$pids" ]; then
+    echo "All Valgrind processes ended...."
+else
+    # If PIDs were found, loop through each PID and kill the process
+    for pid in $pids; do
+        echo "Killing process $pid..."
+        kill -9 $pid
+    done
+fi
+
+# 
+# see if valgrind noticed any problems
+#
+
+for V in out.valgrind.*; do
+    if [ $(cat $V | wc -l) -gt 0 ]; then
+        echo $V
+        cat $V
+    else
+        rm $V
+    fi
+done
+
+
+exit $RETVAL
+

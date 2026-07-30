@@ -1,0 +1,10 @@
+#!/bin/bash
+ionadmin	config.ionrc
+
+acsadmin	config.acsrc
+
+ionsecadmin	config.ionsecrc &
+
+bpadmin		config.bprc
+
+ipnadmin	config.ipnrc &

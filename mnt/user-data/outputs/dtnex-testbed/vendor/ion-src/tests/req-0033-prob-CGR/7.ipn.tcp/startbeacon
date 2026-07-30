@@ -1,0 +1,2 @@
+#!/bin/bash
+ipnd		beacon.ipndrc >& beacon.log &

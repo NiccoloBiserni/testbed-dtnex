@@ -1,0 +1,12 @@
+#!/bin/bash
+ionadmin	amroc.ionrc
+
+acsadmin	amroc.acsrc
+
+ionadmin	../global.ionrc 
+
+ionsecadmin	amroc.ionsecrc 
+
+ltpadmin	amroc.ltprc 
+
+bpadmin		amroc.bprc 

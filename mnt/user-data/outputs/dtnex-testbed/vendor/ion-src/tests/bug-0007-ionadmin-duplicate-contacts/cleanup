@@ -1,0 +1,8 @@
+#!/bin/bash
+#
+# Samuel Jero
+# Ohio University
+# September 21, 2012
+
+echo "Cleaning up old ION..."
+rm -f ion.log tmp.txt ion_nodes

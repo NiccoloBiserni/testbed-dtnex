@@ -1,0 +1,10 @@
+#!/bin/bash
+# shell script to get node running
+ionadmin	../global.ionrc
+sleep 1
+ionsecadmin	node.ionsecrc
+sleep 1
+ltpadmin	node.ltprc
+sleep 1
+bpadmin		node.bprc
+echo "Started node 9."

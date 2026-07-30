@@ -1,0 +1,6 @@
+#!/bin/bash
+ionadmin	node7.ionrc
+sleep 1
+ltpadmin	node7.ltprc
+sleep 1
+bpadmin		node7.bprc

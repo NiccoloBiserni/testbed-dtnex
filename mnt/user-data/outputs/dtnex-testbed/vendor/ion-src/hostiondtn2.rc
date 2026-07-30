@@ -1,0 +1,90 @@
+## begin ionadmin
+1 5 node.ionconfig
+s
+#@ 2012/01/27-16:15:00
+#r 'ionadmin ./global.ionrc'
+# Ranges
+a range +0 +36000 5 5 0
+#a range +0 +36000 5 6 1
+a range +0 +36000 2 5 1
+
+# Contacts (to other nodes via 2)
+a contact +1 +36000 5 5 125000000
+a contact +1 +36000 2 5 10000000
+a contact +1 +36000 5 2 10000000
+a contact +1 +36000 6 5 10000000
+a contact +1 +36000 5 6 10000000
+m clockerr 1
+## end ionadmin
+
+## begin ltpadmin
+e 1
+1 4 400000
+# span to itself (node 1) with 2 Tx and 2 Rx blocks; LTP segment size=1024B; aggregation size=100000B;
+# aggregation time 1s;
+a span 5 2 2 1024 10 1 'udplso 127.0.0.1:1113'
+# span to 2
+#a span 2 2 2 1024 100000 1 'udplso 10.0.1.2:1113'
+w 1
+s 'udplsi 0.0.0.0:1113'
+m screening n
+## end ltpadmin
+
+
+## begin bpadmin
+1
+e 1
+w 1
+
+# Add an EID scheme.
+a scheme ipn 'ipnfw' 'ipnadminep'
+a scheme dtn 'dtn2fw' 'dtn2adminep'
+
+
+# Add endpoints.
+a endpoint ipn:5.0 x
+a endpoint ipn:5.1 x
+a endpoint ipn:5.2 x
+
+
+# Add protocols. 
+a protocol ltp 1400 100 10000000
+# payload # overhead #finestra bloccata
+a protocol tcp 1400 100 10000000
+
+# Add inducts. 
+a induct ltp 5 ltpcli
+a induct tcp 0.0.0.0 tcpcli
+
+# Add outducts.
+#loopback
+a outduct ltp 5 ltpclo
+#a outduct tcp 127.0.0.1 '' No more possible in ION 3.6.x
+
+#Outduct to Vm2
+a outduct ltp 2 ltpclo
+#a outduct tcp 10.0.0.12 ''
+#a outduct tcp 137.204.143.30 ''
+s
+## end bpadmin
+
+## begin ipnadmin 
+a plan 5 ltp/5
+a plan 2 ltp/2
+#a plan 2 tcp/10.0.0.12
+#a plan 6 tcp/137.204.143.30
+a group 1 4 ipn:2.0
+## end ipnadmin
+
+## begin dtn2admin 
+#a plan dtn://carlo-Latitude-E5410.dtn* x ltp/5
+#a plan dtn://ech3.dtn x ltp/5
+a plan dtn://vm2.dtn x tcp/10.0.0.12
+#a plan dtn://vm1.dtn f ipn:2.0
+#a plan dtn://vm3.dtn f ipn:2.0
+#a plan dtn://vm4.dtn f ipn:2.0
+## end dtn2admin
+
+## begin ionsecadmin
+1
+## end ionsecadmin

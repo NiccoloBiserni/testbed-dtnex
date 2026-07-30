@@ -1,0 +1,106 @@
+#!/bin/bash
+# AMS Benchtest script (for simple AMS two-node demo)
+
+# Benchtest variables-------------------------------------------------
+# 
+COUNT=1000
+MESSAGE_SIZE=1000
+
+# Shut down routine---------------------------------------------------
+function stop_and_exit() {
+    local retval=$1  # 0 for success, 1 for failure
+
+    echo "Stopping ION..."
+    cd ../node2
+    ./shutdown_proc
+    cd ../node3
+    ./shutdown_proc    
+    killm
+
+    if [ "$retval" -eq 0 ]; then
+        echo -e "AMS benchtest successfully completed."
+        echo -e "SUCCESS SUCCESS SUCCESS SUCCESS SUCCESS SUCCESS SUCCESS SUCCESS\n"
+        cat bench.log
+    else
+        echo -e "FAILURE FAILURE FAILURE FAILURE FAILURE FAILURE FAILURE FAILURE\n"
+    fi
+    echo ""
+    exit $retval
+}
+
+# Process check -------------------------------------------------------
+check_process_running() {
+    if [ "$1" = "windows" ]; then
+        ps | grep "$BENCHR_PID" | grep -v grep > /dev/null 2>&1
+    else
+        kill -0 $BENCHR_PID >/dev/null 2>&1
+    fi
+
+    if [ "$?" -eq 0 ]; then
+        return 0  # Process is running (success)
+    else
+        return 1  # Process is not running (failure)
+    fi
+}
+
+
+# Ensure cleanup prior to execution
+killm
+./cleanup
+
+export ION_NODE_LIST_DIR=$PWD
+
+# Start nodes
+cd node2
+./ionstart
+cd ../node3
+./ionstart
+sleep 2
+
+echo -e "\nSTARTING AMS BENCH TEST--------------------------------- "
+sleep 2
+
+cd ../node3
+echo -e "Starting amsbench receiver:"
+amsbenchr > bench.log &
+BENCHR_PID=$!
+sleep 3
+
+if ! check_process_running; then
+    echo -e "Error: amsbenchr could not be started!"
+    stop_and_exit 1
+fi
+
+cd ../node2
+echo -e "Starting amsbench sender:"
+amsbenchs $COUNT $MESSAGE_SIZE 2>/dev/null &
+sleep 3
+
+# Wait for the receiver to finish or timeout after 2 minutes
+TIMER=0
+while check_process_running && [ "$TIMER" -lt 120 ]; do
+    TIMER=$((TIMER + 1))
+    sleep 1
+    echo -e "Listening for published AMS messages..."
+done
+
+# If the timer exceeded 120 seconds, kill the hanging process
+if check_process_running; then
+    echo -e "Error: amsbenchr process hung or messages not delivered. Terminating..."
+    kill $BENCHR_PID
+    stop_and_exit 1
+fi
+
+# Verify delivery of bench messages
+cd ../node3
+
+# Allow a few more seconds for write to bench.log
+sleep 3
+
+if grep -q "Received $COUNT messages" bench.log; then
+    echo -e "\nSuccess: delivery of $COUNT messages verified."
+    stop_and_exit 0
+else
+    echo -e "\nFailure: message delivery failure!"
+    stop_and_exit 1
+fi
